@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>字幕时间漂移校正</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --border: #dfe3e8;
+    --text: #1f2933;
+    --muted: #6b7280;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --danger: #dc2626;
+    --danger-bg: #fef2f2;
+    --ok: #047857;
+    --ok-bg: #ecfdf5;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+  header h1 { font-size: 22px; margin: 0 0 4px; }
+  header p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 18px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 12px; }
+  label.field { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  textarea {
+    width: 100%;
+    min-height: 220px;
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    resize: vertical;
+  }
+  textarea:focus, input:focus { outline: 2px solid #bfdbfe; border-color: var(--primary); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  table.anchors { width: 100%; border-collapse: collapse; }
+  table.anchors th {
+    text-align: left; font-size: 12px; color: var(--muted);
+    font-weight: 600; padding: 0 8px 6px;
+  }
+  table.anchors td { padding: 0 8px 8px; vertical-align: middle; }
+  table.anchors td.idx { width: 36px; color: var(--muted); font-size: 13px; }
+  table.anchors td.del { width: 44px; text-align: center; }
+  table.anchors input {
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 14px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .arrow { color: var(--muted); text-align: center; width: 32px; }
+
+  .row-actions { display: flex; gap: 10px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #fff;
+    padding: 8px 16px;
+    font-size: 14px;
+  }
+  button:hover { background: #f3f4f6; }
+  button.primary {
+    background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600;
+  }
+  button.primary:hover { background: var(--primary-hover); }
+  button.link { border: none; background: none; color: var(--primary); padding: 4px 8px; }
+  button.icon { color: var(--danger); padding: 6px 10px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .alert {
+    border-radius: 8px; padding: 10px 14px; font-size: 14px;
+    margin-bottom: 16px; white-space: pre-wrap;
+  }
+  .alert.error { background: var(--danger-bg); border: 1px solid #fecaca; color: var(--danger); }
+  .alert.ok { background: var(--ok-bg); border: 1px solid #a7f3d0; color: var(--ok); }
+  .meta { font-size: 13px; color: var(--muted); margin: 4px 0 12px; }
+  .meta code { background: #f3f4f6; padding: 1px 6px; border-radius: 4px; font-family: var(--mono); }
+
+  .table-scroll { overflow-x: auto; }
+  table.result {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  table.result th, table.result td {
+    border-bottom: 1px solid var(--border);
+    padding: 7px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  table.result th {
+    position: sticky; top: 0; background: #f9fafb;
+    font-size: 12px; color: var(--muted); z-index: 1;
+  }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.idx-col { color: var(--muted); width: 44px; }
+  td.time { font-family: var(--mono); white-space: nowrap; }
+  td.oldtime { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+  td.textcell { min-width: 180px; }
+  .delta-pos { color: var(--danger); }
+  .delta-neg { color: var(--ok); }
+  .delta-zero { color: var(--muted); }
+  .hidden { display: none; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>字幕时间漂移校正</h1>
+    <p>粘贴 SRT 字幕并给出若干「原时间 → 正确时间」锚点，系统按相邻锚点分段线性映射校正。</p>
+  </header>
+
+  <section class="card">
+    <h2>1. 字幕内容（SRT）</h2>
+    <label class="field" for="srt">粘贴完整 SRT</label>
+    <textarea id="srt" spellcheck="false" placeholder="1&#10;00:00:01,000 --> 00:00:03,500&#10;第一句字幕&#10;&#10;2&#10;00:00:05,000 --> 00:00:08,200&#10;第二句字幕"></textarea>
+    <div class="hint">序号与文本原样保留，仅校正时间。时间格式支持 <code>HH:MM:SS,mmm</code>。</div>
+  </section>
+
+  <section class="card">
+    <h2>2. 校正锚点（原时间 → 正确时间）</h2>
+    <table class="anchors">
+      <thead>
+        <tr><th></th><th>原时间（字幕中现在的时间）</th><th class="arrow">→</th><th>正确时间（实际应在的时间）</th><th></th></tr>
+      </thead>
+      <tbody id="anchor-rows"></tbody>
+    </table>
+    <div class="row-actions">
+      <button type="button" id="add-anchor">+ 添加锚点</button>
+      <span class="hint" style="margin:0">
+        至少 1 组；2 组以上时按相邻锚点分段线性校正，首锚点之前 / 末锚点之后沿用最近区段斜率外推。
+        原时间与正确时间都必须严格递增。
+      </span>
+    </div>
+  </section>
+
+  <div class="row-actions" style="margin-bottom:18px">
+    <button type="button" class="primary" id="submit">校正字幕</button>
+    <button type="button" id="load-demo">填入示例</button>
+    <span id="status" class="hint" style="margin:0"></span>
+  </div>
+
+  <div id="error-box" class="alert error hidden"></div>
+
+  <section id="result-card" class="card hidden">
+    <div class="row-actions" style="justify-content:space-between">
+      <h2 style="margin:0">3. 校正结果</h2>
+      <button type="button" class="primary" id="download">下载校正后的 SRT</button>
+    </div>
+    <div class="meta" id="result-meta"></div>
+    <div class="table-scroll">
+      <table class="result">
+        <thead>
+          <tr>
+            <th class="idx-col">#</th>
+            <th>原时间</th>
+            <th>校正后时间</th>
+            <th class="num">偏移</th>
+            <th>文本</th>
+          </tr>
+        </thead>
+        <tbody id="result-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>字幕时间漂移校正 · FastAPI</footer>
+</div>
+
+<script>
+"use strict";
+
+const rowsBody = document.getElementById("anchor-rows");
+const srtInput = document.getElementById("srt");
+const errorBox = document.getElementById("error-box");
+const resultCard = document.getElementById("result-card");
+const resultBody = document.getElementById("result-body");
+const resultMeta = document.getElementById("result-meta");
+const statusEl = document.getElementById("status");
+let lastSrt = "";
+let lastFilename = "corrected.srt";
+
+function addAnchorRow(oldVal = "", newVal = "") {
+  const tr = document.createElement("tr");
+  const n = rowsBody.children.length + 1;
+  tr.innerHTML =
+    `<td class="idx">${n}</td>` +
+    `<td><input class="old" inputmode="numeric" placeholder="00:00:10,000" spellcheck="false"></td>` +
+    `<td class="arrow">→</td>` +
+    `<td><input class="new" inputmode="numeric" placeholder="00:00:12,500" spellcheck="false"></td>` +
+    `<td class="del"><button type="button" class="icon" title="删除该锚点">✕</button></td>`;
+  tr.querySelector(".old").value = oldVal;
+  tr.querySelector(".new").value = newVal;
+  tr.querySelector(".icon").addEventListener("click", () => {
+    tr.remove();
+    renumber();
+  });
+  rowsBody.appendChild(tr);
+}
+
+function renumber() {
+  [...rowsBody.children].forEach((tr, i) => {
+    tr.querySelector(".idx").textContent = i + 1;
+  });
+}
+
+function collectAnchors() {
+  const anchors = [];
+  for (const tr of rowsBody.children) {
+    const old_time = tr.querySelector(".old").value.trim();
+    const new_time = tr.querySelector(".new").value.trim();
+    if (!old_time && !new_time) continue;  // 空行忽略
+    anchors.push({ old_time, new_time });
+  }
+  return anchors;
+}
+
+function showError(msg) {
+  errorBox.textContent = msg;
+  errorBox.classList.remove("hidden");
+  resultCard.classList.add("hidden");
+}
+
+function clearError() {
+  errorBox.textContent = "";
+  errorBox.classList.add("hidden");
+}
+
+function fmtDelta(ms) {
+  const sign = ms > 0 ? "+" : ms < 0 ? "−" : "±";
+  const abs = Math.abs(ms);
+  const s = Math.floor(abs / 1000);
+  const milli = abs % 1000;
+  if (s >= 60) {
+    const m = Math.floor(s / 60), rs = s % 60;
+    return `${sign}${m}分${String(rs).padStart(2, "0")}.${String(milli).padStart(3, "0")}秒`;
+  }
+  return `${sign}${s}.${String(milli).padStart(3, "0")} 秒`;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function renderResult(data) {
+  resultBody.innerHTML = "";
+  for (const c of data.cues) {
+    const tr = document.createElement("tr");
+    const deltaCls = c.delta_ms > 0 ? "delta-pos" : c.delta_ms < 0 ? "delta-neg" : "delta-zero";
+    tr.innerHTML =
+      `<td class="idx-col">${escapeHtml(c.index)}</td>` +
+      `<td class="oldtime">${c.old_start} → ${c.old_end}</td>` +
+      `<td class="time"><strong>${c.new_start} → ${c.new_end}</strong></td>` +
+      `<td class="num ${deltaCls}">${fmtDelta(c.delta_ms)}</td>` +
+      `<td class="textcell">${escapeHtml(c.text).replace(/\n/g, "<br>")}</td>`;
+    resultBody.appendChild(tr);
+  }
+
+  const anchorTxt = data.anchors_used
+    .map(a => `<code>${a.old_time} → ${a.new_time}</code>`)
+    .join("，");
+  const slopeTxt = data.slopes.length
+    ? data.slopes.map(s => `<code>${Number(s).toFixed(4)}×</code>`).join("，")
+    : "";
+  resultMeta.innerHTML =
+    `共 <strong>${data.count}</strong> 条字幕；生效锚点（按原时间排序）：${anchorTxt}。` +
+    (slopeTxt ? ` 各区段映射斜率：${slopeTxt}（斜率 ≠ 1 表示存在变速漂移）。` : "");
+  resultCard.classList.remove("hidden");
+}
+
+document.getElementById("add-anchor").addEventListener("click", () => addAnchorRow());
+
+document.getElementById("submit").addEventListener("click", async () => {
+  clearError();
+  const srt = srtInput.value.trim();
+  if (!srt) { showError("请先粘贴 SRT 字幕内容。"); return; }
+  const anchors = collectAnchors();
+  if (!anchors.length) { showError("请至少填写 1 组锚点。"); return; }
+  for (const [i, a] of anchors.entries()) {
+    if (!a.old_time || !a.new_time) {
+      showError(`第 ${i + 1} 组锚点的两个时间都必须填写（不用的行请清空或删除）。`);
+      return;
+    }
+  }
+
+  statusEl.textContent = "校正中…";
+  try {
+    const resp = await fetch("/api/correct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ srt, anchors })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) {
+      showError(data.error || `请求失败（HTTP ${resp.status}）`);
+      return;
+    }
+    lastSrt = data.srt;
+    renderResult(data);
+    statusEl.textContent = "";
+    resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    showError("无法连接到服务：" + e);
+  } finally {
+    if (statusEl.textContent === "校正中…") statusEl.textContent = "";
+  }
+});
+
+document.getElementById("download").addEventListener("click", () => {
+  if (!lastSrt) return;
+  const blob = new Blob([lastSrt], { type: "application/x-subrip;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = lastFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById("load-demo").addEventListener("click", () => {
+  srtInput.value =
+    "1\n00:00:01,000 --> 00:00:04,000\n开场字幕\n\n" +
+    "2\n00:00:10,000 --> 00:00:13,500\n这是第二句\n\n" +
+    "3\n00:00:30,000 --> 00:00:33,000\n第三句在这里\n\n" +
+    "4\n00:01:00,000 --> 00:01:04,000\n结尾字幕";
+  rowsBody.innerHTML = "";
+  addAnchorRow("00:00:10,000", "00:00:12,000");
+  addAnchorRow("00:01:00,000", "00:01:05,000");
+  clearError();
+  resultCard.classList.add("hidden");
+});
+
+// 初始两行锚点
+addAnchorRow();
+addAnchorRow();
+</script>
+</body>
+</html>

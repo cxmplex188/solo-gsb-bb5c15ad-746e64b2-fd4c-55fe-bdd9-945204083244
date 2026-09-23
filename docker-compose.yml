@@ -1,0 +1,11 @@
+services:
+  subtitle-fixer:
+    build: .
+    image: subtitle-time-fixer:latest
+    container_name: subtitle-time-fixer
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      # 容器内固定监听 8000；宿主机端口由上面的 PORT 变量控制
+      - PORT=8000
+    restart: unless-stopped
